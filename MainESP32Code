@@ -1,0 +1,135 @@
+#include <WiFi.h>
+#include <esp_now.h>
+
+// MAC addresses of the ESP devices (replace these with the actual MAC addresses of your ESPs)
+uint8_t esp1Mac[] = {0x3c, 0x71, 0xbf, 0x85, 0xb7, 0xec}; // ESP1 (Relays)
+uint8_t esp2Mac[] = {0xe4, 0x65, 0xb8, 0x79, 0x5a, 0x74}; // ESP2 (IMU + Temp + Temp)
+uint8_t voltageSensorMac[] = {0xa0, 0xdd, 0x6c, 0xb2, 0x42, 0x4c}; // ESP3 (Voltage Sensor)
+
+// Structure for controlling relays on ESP1
+typedef struct {
+  char command; // 'A', 'a', 'B', 'b', 'C', 'c', 'D', 'd'
+} RelayCommand;
+
+// Structure for receiving voltage data
+typedef struct {
+    float voltage[3];  // Voltages from three dividers
+} VoltageData;
+
+VoltageData voltageData;
+
+// Structure for receiving data from ESP2 (IMU + Temp)
+typedef struct {
+  float orientation[3];
+  float gyro[3];
+  float accel[3];
+  float mlxTemperature;  // MLX90614 temp
+  float dsTemperature;   // DS18B20 temp
+} IMUData;
+
+// Structure for receiving data from ESP3 (Temp only)
+typedef struct {
+  float objectTemp;
+  float ambientTemp;
+} TempData;
+
+// Variables to hold received data
+IMUData imuData;
+TempData tempData;
+
+// Callback for receiving data
+void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+  if (len == sizeof(IMUData)) {
+    memcpy(&imuData, data, sizeof(IMUData));
+    // JSON output for IMU + Temp data
+    String imuJson = "{";
+    imuJson += "\"orientation\": [" + String(imuData.orientation[0]) + ", " + String(imuData.orientation[1]) + ", " + String(imuData.orientation[2]) + "], ";
+    imuJson += "\"gyro\": [" + String(imuData.gyro[0]) + ", " + String(imuData.gyro[1]) + ", " + String(imuData.gyro[2]) + "], ";
+    imuJson += "\"accel\": [" + String(imuData.accel[0]) + ", " + String(imuData.accel[1]) + ", " + String(imuData.accel[2]) + "], ";
+    imuJson += "\"mlxTemperature\": " + String(imuData.mlxTemperature) + ", ";
+    imuJson += "\"dsTemperature\": " + String(imuData.dsTemperature);
+    imuJson += "}";
+    Serial.println(imuJson);
+  } else if (len == sizeof(TempData)) {
+    memcpy(&tempData, data, sizeof(TempData));
+    // JSON output for Temp data
+    String tempJson = "{";
+    tempJson += "\"objectTemp\": " + String(tempData.objectTemp) + ", ";
+    tempJson += "\"ambientTemp\": " + String(tempData.ambientTemp);
+    tempJson += "}";
+    Serial.println(tempJson);
+  } else if (len == sizeof(VoltageData)) {
+      memcpy(&voltageData, data, sizeof(VoltageData));
+
+        // Print received voltage data in JSON format
+        String voltageJson = "{";
+        voltageJson += "\"VB1\":" + String(voltageData.voltage[0]) + ",";
+        voltageJson += "\"VB2\":" + String(voltageData.voltage[1]) + ",";
+        voltageJson += "\"VB3\":" + String(voltageData.voltage[2]);
+        voltageJson += "}";
+
+        Serial.println(voltageJson);
+  } else {
+    Serial.println("Unknown data received!");
+  }
+}
+
+// Callback for sent data
+void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  Serial.print("Send Status: ");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Success" : "Fail");
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  // Set WiFi to station mode
+  WiFi.mode(WIFI_STA);
+
+  // Initialize ESP-NOW
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Error initializing ESP-NOW");
+    return;
+  }
+
+  // Register send and receive callbacks
+  esp_now_register_send_cb(onDataSent);
+  esp_now_register_recv_cb(onDataRecv);
+
+  // Add peers
+  esp_now_peer_info_t peerInfo;
+  memcpy(peerInfo.peer_addr, voltageSensorMac, 6);// Add the Voltage Sensor ESP32 as a peer
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+        Serial.println("Failed to add Voltage Sensor ESP32 as peer");
+        return;
+    }
+
+  memcpy(peerInfo.peer_addr, esp1Mac, 6);
+  esp_now_add_peer(&peerInfo);
+
+  memcpy(peerInfo.peer_addr, esp2Mac, 6);
+  esp_now_add_peer(&peerInfo);
+
+  memcpy(peerInfo.peer_addr, esp3Mac, 6);
+  esp_now_add_peer(&peerInfo);
+
+  Serial.println("Main ESP Ready");
+}
+
+void loop() {
+  if (Serial.available()) {
+    char input = Serial.read();
+
+    if (input == 'A' || input == 'a' || input == 'B' || input == 'b' || input == 'C' || input == 'c' || input == 'D' || input == 'd') {
+      RelayCommand relayCommand = {input};
+      esp_now_send(esp1Mac, (uint8_t *)&relayCommand, sizeof(relayCommand));
+      Serial.print("Command Sent to ESP1: ");
+      Serial.println(input);
+    } else {
+      Serial.println("Invalid Command. Use 'A', 'a', 'B', 'b', 'C', 'c', 'D', 'd'");
+    }
+  }
+  delay(100);
+}
