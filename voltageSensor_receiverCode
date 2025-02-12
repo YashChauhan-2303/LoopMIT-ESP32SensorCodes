@@ -1,0 +1,95 @@
+#include <WiFi.h>
+#include <esp_now.h>
+
+// Debugging flag
+bool debug = false;
+
+// Resistor values for voltage divider (in Ohms)
+const int R1 = 15000;   // Resistor R1
+const int R2 = 150000;  // Resistor R2
+
+// ADC pins for voltage measurement
+const int VinPin1 = 32; // First voltage divider input
+const int VinPin2 = 33; // Second voltage divider input
+const int VinPin3 = 34; // Third voltage divider input
+
+// Structure to hold voltage data
+typedef struct {
+    float voltage[3];  // Voltages from three dividers
+} VoltageData;
+
+VoltageData voltageData;
+
+// MAC address of Main ESP32 (Replace with actual MAC)
+uint8_t mainEspMac[] = {0x88, 0x13, 0xbf, 0x03, 0x67, 0x20}; // Main ESP32 MAC (UPDATE THIS!)
+
+void onDataSent(const uint8_t *macAddr, esp_now_send_status_t status) {
+    Serial.print("Data send status: ");
+    Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Success" : "Fail");
+}
+
+void setup() {
+    Serial.begin(115200);
+
+    // Set WiFi to station mode
+    WiFi.mode(WIFI_STA);
+
+    // Initialize ESP-NOW
+    if (esp_now_init() != ESP_OK) {
+        Serial.println("Error initializing ESP-NOW");
+        return;
+    }
+
+    // Register send callback
+    esp_now_register_send_cb(onDataSent);
+
+    // Add Main ESP32 as a peer
+    esp_now_peer_info_t peerInfo;
+    memcpy(peerInfo.peer_addr, mainEspMac, 6);
+    peerInfo.channel = 0;
+    peerInfo.encrypt = false;
+    if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+        Serial.println("Failed to add Main ESP32 as peer");
+        return;
+    }
+
+    Serial.println("Child ESP Ready");
+}
+
+void loop() {
+    readVoltages();
+
+    // Send voltage data via ESP-NOW
+    esp_err_t result = esp_now_send(mainEspMac, (uint8_t *)&voltageData, sizeof(voltageData));
+    if (result == ESP_OK) {
+        Serial.println("Voltage Data Sent Successfully");
+    } else {
+        Serial.println("Error Sending Voltage Data");
+    }
+
+    // Print data for debugging
+    if (debug) {
+        printVoltageData();
+    }
+
+    delay(500);
+}
+
+// Function to read voltages from three dividers
+void readVoltages() {
+    uint32_t voltage_mV1 = analogReadMilliVolts(VinPin1);
+    uint32_t voltage_mV2 = analogReadMilliVolts(VinPin2);
+    uint32_t voltage_mV3 = analogReadMilliVolts(VinPin3);
+
+    // Compute actual voltages using voltage divider formula
+    voltageData.voltage[0] = (((float)voltage_mV1) / 1000.0) * (1 + (float)R2 / (float)R1);
+    voltageData.voltage[1] = (((float)voltage_mV2) / 1000.0) * (1 + (float)R2 / (float)R1);
+    voltageData.voltage[2] = (((float)voltage_mV3) / 1000.0) * (1 + (float)R2 / (float)R1);
+}
+
+// Function to print voltage data for debugging
+void printVoltageData() {
+    Serial.printf("VB1: %.2f V, VB2: %.2f V, VB3: %.2f V\n", 
+                  voltageData.voltage[0], voltageData.voltage[1], voltageData.voltage[2]);
+    Serial.println("------------------------");
+}
