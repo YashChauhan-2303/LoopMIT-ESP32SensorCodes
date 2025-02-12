@@ -1,0 +1,133 @@
+#include <Wire.h> 
+#include <WiFi.h> 
+#include <esp_now.h> 
+#include <Adafruit_BNO055.h> 
+#include <Adafruit_MLX90614.h> 
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
+// DS18B20 GPIO
+#define ONE_WIRE_BUS 4  
+
+// Initialize Sensors
+Adafruit_BNO055 bno = Adafruit_BNO055(55);
+Adafruit_MLX90614 mlx = Adafruit_MLX90614();
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature dsSensor(&oneWire);
+
+// ESP-NOW Data Structure
+typedef struct { 
+    float orientation[3]; 
+    float gyro[3]; 
+    float accel[3]; 
+    float mlxTemperature;  // MLX90614 temp
+    float dsTemperature;   // DS18B20 temp
+} IMUData; 
+
+IMUData imuData;
+
+// Correct ESP32 Receiver MAC Address
+uint8_t mainEspMac[] = {0x88, 0x13, 0xBF, 0x03, 0x67, 0x20};
+
+// ESP-NOW Callback
+void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+    Serial.print("📡 ESP-NOW Send Status: ");
+    Serial.println(status == ESP_NOW_SEND_SUCCESS ? "✅ Success" : "❌ Failed");
+}
+
+void setup() {
+    Serial.begin(115200);
+    delay(100);
+
+    // Initialize BNO055 and MLX90614
+    if (!bno.begin()) {
+        Serial.println("❌ BNO055 initialization failed!");
+    } else {
+        Serial.println("✅ BNO055 initialized.");
+    }
+
+    if (!mlx.begin()) {
+        Serial.println("❌ MLX90614 initialization failed!");
+    } else {
+        Serial.println("✅ MLX90614 initialized.");
+    }
+
+    // Initialize DS18B20
+    dsSensor.begin();
+    Serial.println("🔍 Scanning for DS18B20...");
+
+    byte address[8];  
+    if (oneWire.search(address)) {
+        Serial.println("✅ DS18B20 detected!");
+    } else {
+        Serial.println("❌ No DS18B20 found! Check wiring.");
+    }
+
+    // Initialize ESP-NOW
+    WiFi.mode(WIFI_STA);
+    delay(100);
+
+    if (esp_now_init() != ESP_OK) {
+        Serial.println("❌ ESP-NOW Initialization Failed");
+        return;
+    }
+
+    // Register ESP-NOW Callback
+    esp_now_register_send_cb(onDataSent);
+
+    // Add Peer
+    esp_now_peer_info_t peerInfo = {};  // Zero-initialize struct
+    memcpy(peerInfo.peer_addr, mainEspMac, 6);
+    peerInfo.channel = 0;
+    peerInfo.encrypt = false;
+
+    if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+        Serial.println("❌ Failed to add ESP-NOW peer!");
+    } else {
+        Serial.println("✅ ESP-NOW Peer Added.");
+    }
+}
+
+void loop() {
+    // Read BNO055 sensor data
+    sensors_event_t orientationData, gyroData, accelData;
+    bno.getEvent(&orientationData, Adafruit_BNO055::VECTOR_EULER);
+    bno.getEvent(&gyroData, Adafruit_BNO055::VECTOR_GYROSCOPE);
+    bno.getEvent(&accelData, Adafruit_BNO055::VECTOR_ACCELEROMETER);
+
+    imuData.orientation[0] = orientationData.orientation.x;
+    imuData.orientation[1] = orientationData.orientation.y;
+    imuData.orientation[2] = orientationData.orientation.z;
+    imuData.gyro[0] = gyroData.gyro.x;
+    imuData.gyro[1] = gyroData.gyro.y;
+    imuData.gyro[2] = gyroData.gyro.z;
+    imuData.accel[0] = accelData.acceleration.x;
+    imuData.accel[1] = accelData.acceleration.y;
+    imuData.accel[2] = accelData.acceleration.z;
+
+    // Read MLX90614 temperature
+    imuData.mlxTemperature = mlx.readObjectTempC();
+
+    // Read DS18B20 temperature
+    dsSensor.requestTemperatures();
+    delay(10);  // Small delay to avoid timing issues
+    float dsTemp = dsSensor.getTempCByIndex(0);
+    if (dsTemp == DEVICE_DISCONNECTED_C) {
+        Serial.println("⚠️ DS18B20 not responding! Check wiring.");
+        imuData.dsTemperature = -999.0;  // Indicate error
+    } else {
+        imuData.dsTemperature = dsTemp;
+    }
+
+    // Print values to Serial Monitor
+    Serial.print("MLX90614 Temp: "); Serial.print(imuData.mlxTemperature); Serial.print("°C | ");
+    Serial.print("DS18B20 Temp: "); Serial.print(imuData.dsTemperature); Serial.println("°C");
+
+    // Send Data via ESP-NOW
+    esp_err_t result = esp_now_send(mainEspMac, (uint8_t *)&imuData, sizeof(imuData));
+    if (result != ESP_OK) {
+        Serial.println("❌ ESP-NOW Send Failed!");
+    }
+
+    delay(2000);
+}
