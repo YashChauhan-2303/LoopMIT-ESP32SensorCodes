@@ -1,0 +1,74 @@
+//Reciever
+#include <WiFi.h> 
+#include <esp_now.h> 
+#define RELAY_1_PIN 26 
+#define RELAY_2_PIN 27 
+#define RELAY_3_PIN 18 
+#define RELAY_4_PIN 19 
+typedef struct { 
+  char command; // 'A', 'a', 'B', 'b', 'C', 'c', 'D', 'd' 
+} RelayCommand; 
+void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) { 
+  RelayCommand relayCommand; 
+  memcpy(&relayCommand, data, sizeof(relayCommand)); 
+  switch (relayCommand.command) { 
+    case 'A': 
+      digitalWrite(RELAY_1_PIN, HIGH); 
+      Serial.println("Relay 1 ON"); 
+      break; 
+    case 'a': 
+      digitalWrite(RELAY_1_PIN, LOW); 
+      Serial.println("Relay 1 OFF"); 
+      break; 
+    case 'B': 
+      digitalWrite(RELAY_2_PIN, HIGH); 
+      Serial.println("Relay 2 ON"); 
+      break; 
+    case 'b': 
+      digitalWrite(RELAY_2_PIN, LOW); 
+      Serial.println("Relay 2 OFF"); 
+      break; 
+    case 'C': 
+      digitalWrite(RELAY_3_PIN, HIGH); 
+      Serial.println("Relay 3 ON"); 
+      break; 
+    case 'c': 
+      digitalWrite(RELAY_3_PIN, LOW); 
+      Serial.println("Relay 3 OFF"); 
+      break;
+    case 'D': 
+      digitalWrite(RELAY_4_PIN, HIGH); 
+      Serial.println("Relay 4 ON"); 
+      break; 
+    case 'd': 
+      digitalWrite(RELAY_4_PIN, LOW); 
+      Serial.println("Relay 4 OFF"); 
+      break;    
+    default: 
+      Serial.println("Invalid Command"); 
+      break; 
+  } 
+} 
+
+void setup() { 
+  Serial.begin(115200); 
+  pinMode(RELAY_1_PIN, OUTPUT); 
+  pinMode(RELAY_2_PIN, OUTPUT); 
+  pinMode(RELAY_3_PIN, OUTPUT); 
+  pinMode(RELAY_4_PIN, OUTPUT); 
+  digitalWrite(RELAY_1_PIN, LOW); 
+  digitalWrite(RELAY_2_PIN, LOW); 
+  digitalWrite(RELAY_3_PIN, LOW); 
+  digitalWrite(RELAY_4_PIN, LOW); 
+  WiFi.mode(WIFI_STA); 
+  if (esp_now_init() != ESP_OK) { 
+    Serial.println("Error initializing ESP-NOW"); 
+    return; 
+  } 
+  esp_now_register_recv_cb(onDataRecv); 
+  Serial.println("ESP1 Ready"); 
+} 
+
+void loop() { 
+  delay(1000); 
+}
