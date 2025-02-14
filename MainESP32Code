@@ -112,9 +112,6 @@ void setup() {
   memcpy(peerInfo.peer_addr, esp2Mac, 6);
   esp_now_add_peer(&peerInfo);
 
-  memcpy(peerInfo.peer_addr, esp3Mac, 6);
-  esp_now_add_peer(&peerInfo);
-
   Serial.println("Main ESP Ready");
 }
 
